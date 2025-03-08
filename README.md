@@ -76,6 +76,20 @@ Available tools: meta=None nextCursor=None tools=[...]
 BMI calculation result: 22.857142857142858
 Weather data: {"current_weather":{"temperature":14.2,"windspeed":12.6, ...}}
 ```
+# Test with MCP Inspector
+
+```
+  ❯ mcp dev src/server/example_server.py
+Starting MCP inspector...
+Proxy server listening on port 3000
+
+🔍 MCP Inspector is up and running at http://localhost:5173 🚀
+New SSE connection
+Query parameters: {
+  transportType: 'stdio',
+  command: 'uv',
+  args: 'run --with mcp mcp run src/server/example_server.py',
+```
 
 ## Resources
 

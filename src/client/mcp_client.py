@@ -1,16 +1,17 @@
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 import logging
-from openai import AsyncOpenAI
 import json
 import os
+import asyncio
 from dotenv import load_dotenv
+from openai import AsyncOpenAI
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Enable logging
-logging.basicConfig(level=logging.DEBUG)
+# Enable logging but set to INFO to reduce noise
+logging.basicConfig(level=logging.INFO)
 
 # Create server parameters for stdio connection
 server_params = StdioServerParameters(
@@ -21,12 +22,10 @@ server_params = StdioServerParameters(
 
 # Initialize OpenAI client with API key from environment variable
 openai_client = AsyncOpenAI(
-    # If OPENAI_API_KEY is set as an environment variable, it will be used automatically
-    # Otherwise, you can specify a different env variable name
     api_key=os.getenv("OPENAI_API_KEY")
 )
 
-# Define a local dummy prompt - this simulates what would normally come from the server
+# Define a local dummy prompt templates
 DUMMY_PROMPTS = {
     "weather-assistant": {
         "template": "You are a weather assistant. The current weather in {location} is {temperature}°C with {conditions}. Please provide a friendly weather report and clothing recommendation.",
@@ -38,41 +37,47 @@ DUMMY_PROMPTS = {
     }
 }
 
+# Store conversation history
+conversation_history = [
+    {"role": "system", "content": "You are a helpful assistant."}
+]
+
 async def run():
-    print("Starting client...")
+    print("\n===== MCP CLIENT WITH OPENAI INTEGRATION =====")
+    print("This client connects to a local MCP server and OpenAI's API")
+    
     async with stdio_client(server_params) as (read, write):
-        print("Connected to server via stdio")
+        print("\nConnected to server via stdio")
         
         # Create a sampling callback that uses OpenAI
         async def handle_openai_sampling(message: types.CreateMessageRequestParams) -> types.CreateMessageResult:
             try:
-                # Get the user's message content - fixed extraction method
+                # Get the user's message content
                 user_content = ""
                 if message.messages and len(message.messages) > 0:
                     last_message = message.messages[-1]
                     if hasattr(last_message, "content"):
-                        # Handle different content types
                         for content_item in last_message.content:
                             if content_item.type == "text":
                                 user_content += content_item.text
                 
-                # Fall back to a default message if we couldn't extract content
                 if not user_content:
                     user_content = "Hello, please assist me."
                 
-                print(f"Sending to OpenAI: {user_content}")
+                # Update conversation history
+                conversation_history.append({"role": "user", "content": user_content})
                 
-                # Call OpenAI API
+                # Call OpenAI API with the full conversation history
                 response = await openai_client.chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": user_content}
-                    ]
+                    messages=conversation_history
                 )
                 
                 # Get the generated text from OpenAI
                 ai_text = response.choices[0].message.content
+                
+                # Update conversation history with assistant's response
+                conversation_history.append({"role": "assistant", "content": ai_text})
                 
                 return types.CreateMessageResult(
                     role="assistant",
@@ -112,95 +117,159 @@ async def run():
             for arg_name, arg_value in args.items():
                 prompt_text = prompt_text.replace(f"{{{arg_name}}}", str(arg_value))
             
-            print(f"Processed prompt template: {prompt_text}")
+            # Reset conversation history with the new system prompt
+            nonlocal conversation_history
+            conversation_history = [
+                {"role": "system", "content": prompt_text},
+                {"role": "user", "content": "Please help me based on this information."}
+            ]
             
             # Send the filled prompt to OpenAI
             response = await openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": prompt_text},
-                    {"role": "user", "content": "Please help me based on this information."}
-                ]
+                messages=conversation_history
             )
+            
+            # Update conversation history
+            conversation_history.append({"role": "assistant", "content": response.choices[0].message.content})
             
             return response.choices[0].message.content
         
         async with ClientSession(read, write, sampling_callback=handle_openai_sampling) as session:
             # Initialize the connection
-            print("Initializing session...")
             await session.initialize()
             
             # List available tools
-            print("Listing tools...")
+            print("Checking available tools...")
             tools = await session.list_tools()
-            print("Available tools:", tools)
             
+            # Print tools information - Modified to handle potential attribute differences
             try:
-                # Try calling the BMI calculator tool
-                print("Calling calculate_bmi...")
-                result = await session.call_tool("calculate_bmi", arguments={"weight_kg": 70, "height_m": 1.75})
-                print("BMI calculation result:", result)
-            except Exception as e:
-                print(f"Error calling calculate_bmi: {e}")
+                # Try with the name attribute - common alternative to id
+                tool_names = [tool.name for tool in tools.tools]
+                print(f"Found {len(tools.tools)} tools: {', '.join(tool_names)}\n")
+            except AttributeError:
+                # If name doesn't work, try to inspect the first tool to find available attributes
+                if tools.tools:
+                    print(f"Found {len(tools.tools)} tools. First tool attributes: {dir(tools.tools[0])}\n")
+                else:
+                    print("No tools found\n")
             
-            try:
-                # Try calling the weather tool
-                print("Calling fetch_weather...")
-                weather = await session.call_tool("fetch_weather", arguments={"latitude": 52.07, "longitude": -1.014})
-                print("Weather data:", weather)
-            except Exception as e:
-                print(f"Error calling fetch_weather: {e}")
-            
-            # List available prompts from server
-            print("Listing server prompts...")
-            prompts = await session.list_prompts()
-            print("Available server prompts:", prompts)
-            
-            # Demo local prompts instead of relying on server prompts
-            print("\n--- DEMONSTRATING LOCAL PROMPT HANDLING ---")
-            print("Available local prompts:", json.dumps(list(DUMMY_PROMPTS.keys()), indent=2))
-            
-            try:
-                # Process a weather assistant prompt locally
-                print("\nProcessing weather-assistant prompt locally...")
-                weather_args = {
-                    "location": "New York",
-                    "temperature": 22,
-                    "conditions": "partly cloudy"
-                }
-                weather_response = await process_local_prompt("weather-assistant", weather_args)
-                print(f"Weather assistant response:\n{weather_response}\n")
+            # Main interactive loop
+            print("===== INTERACTIVE MENU =====")
+            while True:
+                print("\nChoose an option:")
+                print("1. Chat with AI assistant")
+                print("2. Use weather assistant prompt")
+                print("3. Use code helper prompt")
+                print("4. Call BMI calculator tool")
+                print("5. Call weather tool")
+                print("6. Exit")
                 
-                # Process a code helper prompt locally
-                print("Processing code-helper prompt locally...")
-                code_args = {
-                    "language": "Python",
-                    "problem": "How do I read a JSON file in Python?"
-                }
-                code_response = await process_local_prompt("code-helper", code_args)
-                print(f"Code helper response:\n{code_response}\n")
+                choice = input("\nEnter option (1-6): ").strip()
                 
-                # Try to get a prompt from server (this might fail)
-                print("Attempting to get prompt from server (may fail if not supported)...")
-                try:
-                    prompt = await session.get_prompt("example-prompt", arguments={"arg1": "value"})
-                    print("Server prompt result:", prompt)
-                except Exception as e:
-                    print(f"Server doesn't support this prompt: {e}")
-                    print("This is expected with the example server")
+                if choice == "1":
+                    print("\n===== CHAT MODE =====")
+                    print("Type 'exit' to return to menu")
+                    
+                    # Reset conversation history
+                    conversation_history = [
+                        {"role": "system", "content": "You are a helpful assistant."}
+                    ]
+                    
+                    while True:
+                        user_input = input("\nYou: ").strip()
+                        if user_input.lower() == 'exit':
+                            break
+                            
+                        # Update conversation history
+                        conversation_history.append({"role": "user", "content": user_input})
+                        
+                        # Call OpenAI directly for better conversation flow
+                        response = await openai_client.chat.completions.create(
+                            model="gpt-3.5-turbo",
+                            messages=conversation_history
+                        )
+                        
+                        assistant_response = response.choices[0].message.content
+                        print(f"\nAssistant: {assistant_response}")
+                        
+                        # Update conversation history
+                        conversation_history.append({"role": "assistant", "content": assistant_response})
                 
-            except Exception as e:
-                print(f"Error processing local prompts: {e}")
-            
-            # List available resources
-            print("\nListing resources...")
-            resources = await session.list_resources()
-            print("Available resources:", resources)
-            
-            # Since reading a resource will likely fail, we'll just log this
-            print("\nNote: Reading resource 'file://some/path' would normally fail")
-            print("with the example server as it doesn't have resource capabilities.")
+                elif choice == "2":
+                    print("\n===== WEATHER ASSISTANT =====")
+                    location = input("Enter location (e.g., New York): ").strip()
+                    try:
+                        temperature = float(input("Enter temperature in °C: ").strip())
+                        conditions = input("Enter weather conditions (e.g., sunny, rainy): ").strip()
+                        
+                        weather_args = {
+                            "location": location,
+                            "temperature": temperature,
+                            "conditions": conditions
+                        }
+                        
+                        print("\nGenerating weather report...")
+                        weather_response = await process_local_prompt("weather-assistant", weather_args)
+                        print(f"\nWeather Assistant: {weather_response}")
+                    except ValueError:
+                        print("Error: Please enter a valid number for temperature")
+                
+                elif choice == "3":
+                    print("\n===== CODE HELPER =====")
+                    language = input("Enter programming language: ").strip()
+                    problem = input("Describe your coding problem: ").strip()
+                    
+                    code_args = {
+                        "language": language,
+                        "problem": problem
+                    }
+                    
+                    print("\nGenerating coding help...")
+                    code_response = await process_local_prompt("code-helper", code_args)
+                    print(f"\nCode Assistant: {code_response}")
+                
+                elif choice == "4":
+                    print("\n===== BMI CALCULATOR =====")
+                    try:
+                        weight = float(input("Enter weight in kg: ").strip())
+                        height = float(input("Enter height in meters: ").strip())
+                        
+                        print("\nCalculating BMI...")
+                        # Check what attribute to use for tool identification (modify as needed)
+                        tool_name = "calculate_bmi"  # This may need to be adjusted based on the actual tool structure
+                        result = await session.call_tool(tool_name, arguments={"weight_kg": weight, "height_m": height})
+                        print(f"Your BMI is: {result}")
+                    except ValueError:
+                        print("Error: Please enter valid numbers for weight and height")
+                    except Exception as e:
+                        print(f"Error calling BMI calculator: {e}")
+                
+                elif choice == "5":
+                    print("\n===== WEATHER TOOL =====")
+                    try:
+                        latitude = float(input("Enter latitude: ").strip())
+                        longitude = float(input("Enter longitude: ").strip())
+                        
+                        print("\nFetching weather data...")
+                        try:
+                            # Check what attribute to use for tool identification (modify as needed)
+                            tool_name = "fetch_weather"  # This may need to be adjusted based on the actual tool structure
+                            weather = await session.call_tool(tool_name, arguments={"latitude": latitude, "longitude": longitude})
+                            print(f"Weather data: {json.dumps(weather, indent=2)}")
+                        except Exception as e:
+                            print(f"Error calling weather tool: {e}")
+                            print("Note: This tool may not be available in the example server")
+                    except ValueError:
+                        print("Error: Please enter valid numbers for latitude and longitude")
+                
+                elif choice == "6":
+                    print("\nExiting program...")
+                    break
+                
+                else:
+                    print("Invalid option. Please enter a number between 1 and 6.")
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(run())

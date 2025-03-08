@@ -76,7 +76,8 @@ Available tools: meta=None nextCursor=None tools=[...]
 BMI calculation result: 22.857142857142858
 Weather data: {"current_weather":{"temperature":14.2,"windspeed":12.6, ...}}
 ```
-# Test with MCP Inspector
+## Test with MCP Inspector 
+( run command below and then visit http://localhost:5173 )
 
 ```
   ❯ mcp dev src/server/example_server.py

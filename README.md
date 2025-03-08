@@ -9,6 +9,12 @@ This example shows how to:
 - Connect to the server using an MCP client
 - Call tools and get responses from the server
 
+## Tutorial Video
+
+[![MCP Tutorial Video](https://img.youtube.com/vi/oq3dkNm51qc/0.jpg)](https://youtu.be/oq3dkNm51qc)
+
+Click the image above to watch a tutorial on MCP implementation.
+
 ## Project Structure
 
 ```

@@ -1,5 +1,6 @@
 from mcp.server.fastmcp import FastMCP
 import httpx
+import asyncio
 
 mcp = FastMCP("Python360")
 
@@ -21,4 +22,11 @@ async def fetch_weather(latitude: float, longitude: float) -> str:
         return response.text
 
 if __name__ == "__main__":
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    # Start background async tasks (if needed)
+    loop.run_until_complete(asyncio.sleep(0))  # Ensures an event loop is available
+
+    # Now run FastMCP (blocking)
     mcp.run()

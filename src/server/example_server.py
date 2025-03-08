@@ -30,3 +30,7 @@ if __name__ == "__main__":
 
     # Now run FastMCP (blocking)
     mcp.run()
+
+    """Since mcp.run() is blocking, but we also have async functions (like fetch_weather), 
+        the best solution is to run the  async tasks in a background event loop before calling mcp.run().
+    """

@@ -1,4 +1,4 @@
-# MCP Client Example
+# MCP Client Example ☀️ 
 
 This project demonstrates a simple client-server implementation using the Model Context Protocol (MCP), which is a standardized way to connect large language models with tools and data.
 
